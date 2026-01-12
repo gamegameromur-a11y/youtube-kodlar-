@@ -1,0 +1,52 @@
+1. Görsel Üretim Mantığı (Backend - server/routes.ts)
+Bu kısım, OpenAI'ın görüntü oluşturma modelini (gpt-image-1) kullanarak metni gerçek bir resme dönüştürüyor:
+
+// server/routes.ts (API Rotaları)
+app.post("/api/images", async (req, res) => {
+  const { prompt } = req.body;
+  
+  // OpenAI ile görsel üretimi
+  const response = await openai.images.generate({
+    model: "gpt-image-1",
+    prompt: prompt,
+    size: "1024x1024",
+  });
+  // Base64 formatında gelen resmi veri olarak alıyoruz
+  const imageUrl = `data:image/png;base64,${response.data[0].b64_json}`;
+  
+  // Veritabanına kaydetme
+  const image = await storage.createImage({
+    prompt,
+    imageUrl,
+    style: "ai-generated",
+    aiInterpretation: "Gerçekçi AI üretimi görsel."
+  });
+  
+  res.status(201).json(image);
+});
+2. PNG İndirme Fonksiyonu (Frontend - client/src/pages/ImageDetails.tsx)
+Oluşturulan Base64 formatındaki resmi PNG dosyası olarak kaydetmemizi sağlayan kod:
+
+// client/src/pages/ImageDetails.tsx
+import { saveAs } from "file-saver";
+const handleDownload = () => {
+  if (!image) return;
+  // Base64 verisini PNG olarak indirir
+  saveAs(image.imageUrl, `ai-art-${image.id}.png`);
+  toast({
+    title: "İndirildi",
+    description: "Resim cihazınıza PNG olarak kaydedildi.",
+  });
+};
+3. Veritabanı Şeması (Shared - shared/schema.ts)
+Resimlerin ve açıklamaların nasıl saklandığını belirleyen yapı:
+
+// shared/schema.ts
+export const images = pgTable("images", {
+  id: serial("id").primaryKey(),
+  prompt: text("prompt").notNull(),
+  imageUrl: text("image_url").notNull(), // Resim verisi burada saklanır
+  style: text("style").notNull(),
+  aiInterpretation: text("ai_interpretation"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
