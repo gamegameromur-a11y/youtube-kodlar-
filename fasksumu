@@ -1,0 +1,213 @@
+# =========================
+# fasksumu – SINGLE FILE
+# =========================
+
+import os, json, uuid, requests, traceback
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+CORS(app)
+
+# ========== CONFIG ==========
+DATA = {"users":[], "presentations":[]}
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+SEARCH_API_KEY = os.getenv("SEARCH_API_KEY")  # SerpAPI
+MAX_SLIDES = 50
+
+# ========== HELPERS ==========
+def auth():
+    return request.headers.get("Authorization")
+
+def web_search(q):
+    if not SEARCH_API_KEY: return []
+    try:
+        r = requests.get(
+            "https://serpapi.com/search.json",
+            params={"q": q, "api_key": SEARCH_API_KEY, "num": 5},
+            timeout=15
+        ).json()
+        return [x.get("snippet","") for x in r.get("organic_results",[])]
+    except:
+        return []
+
+# ========== AUTH ==========
+@app.post("/api/register")
+def register():
+    d = request.json
+    if any(u["email"]==d["email"] for u in DATA["users"]):
+        return {"error":"exists"},409
+    uid=str(uuid.uuid4())
+    DATA["users"].append({
+        "id":uid,
+        "email":d["email"],
+        "pw":generate_password_hash(d["password"])
+    })
+    return {"ok":True}
+
+@app.post("/api/login")
+def login():
+    d=request.json
+    for u in DATA["users"]:
+        if u["email"]==d["email"] and check_password_hash(u["pw"], d["password"]):
+            return {"token":u["id"]}
+    return {"error":"invalid"},401
+
+# ========== GENERATE ==========
+@app.post("/api/generate")
+def generate():
+    j=request.json
+    topic=j.get("topic","Untitled")
+    lang=j.get("language","en")
+    ttype=j.get("type","topic")
+
+    web=""
+    if ttype=="person":
+        web="\n".join(web_search(topic+" biography")[:3])
+
+    prompt=f"""
+Create a presentation in {lang}.
+Topic: {topic}
+
+Public web info:
+{web}
+
+Rules:
+- Human, formal, clear
+- Max {MAX_SLIDES} slides
+- Return ONLY JSON:
+{{
+ "title":"...",
+ "slides":[{{"title":"...","content":"..."}}],
+ "music":{{"source":"youtube|spotify|internal","query":"...","mood":"cinematic_epic|calm_focus"}}
+}}
+"""
+
+    try:
+        r=requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization":f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model":GROQ_MODEL,
+                "messages":[{"role":"user","content":prompt}],
+                "temperature":0.4
+            },
+            timeout=30
+        ).json()
+        txt=r["choices"][0]["message"]["content"]
+        js=json.loads(txt[txt.find("{"):txt.rfind("}")+1])
+        js["slides"]=js["slides"][:MAX_SLIDES]
+        return js
+    except:
+        traceback.print_exc()
+        return {
+            "title":topic,
+            "slides":[
+                {"title":"Intro","content":"Introduction"},
+                {"title":"Main","content":"Main points"},
+                {"title":"End","content":"Conclusion"}
+            ],
+            "music":{"source":"internal","mood":"calm_focus","query":"calm"}
+        }
+
+# ========== SAVE ==========
+@app.post("/api/save")
+def save():
+    uid=auth()
+    p=request.json
+    p["id"]=str(uuid.uuid4())
+    p["owner"]=uid
+    DATA["presentations"].append(p)
+    return {"ok":True}
+
+# ========== FRONTEND ==========
+@app.get("/")
+def index():
+    return """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>fasksumu</title>
+<style>
+body{margin:0;font-family:Arial;background:#0f1220;color:#fff}
+header,footer{padding:12px;background:#0b0e1a}
+button{background:#1f2350;color:#fff;border:1px solid #2c31a6;padding:8px;border-radius:8px}
+.stage{height:calc(100vh - 120px);display:flex;align-items:center;justify-content:center}
+.slide{max-width:900px;background:#171a2e;padding:30px;border-radius:20px;display:none}
+.slide.active{display:block;animation:in .6s}
+@keyframes in{from{opacity:0;transform:scale(.95)}to{opacity:1}}
+</style>
+</head>
+<body>
+
+<header>
+  <button onclick="start()">▶ Start</button>
+  <button onclick="prev()">◀</button>
+  <button onclick="next()">▶</button>
+</header>
+
+<div class="stage" id="stage"></div>
+
+<footer>
+  <span id="counter"></span>
+</footer>
+
+<audio id="bgm" loop></audio>
+
+<script>
+let pres=null,idx=0,slides=[],started=false;
+const stage=document.getElementById("stage");
+const bgm=document.getElementById("bgm");
+
+async function start(){
+  if(started) return;
+  started=true;
+  await bgm.play().catch(()=>{});
+  bgm.pause();
+  generate();
+}
+
+async function generate(){
+  const r=await fetch("/api/generate",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({topic:"Mustafa Kemal Atatürk",language:"tr",type:"person"})
+  });
+  pres=await r.json();
+  if(pres.music.source==="internal"){
+    bgm.src="https://cdn.pixabay.com/audio/2022/10/26/audio_946b9fa4b7.mp3";
+    bgm.volume=0.15;
+    bgm.play();
+  }
+  slides=pres.slides;
+  render();
+}
+
+function render(){
+  stage.innerHTML="";
+  slides.forEach((s,i)=>{
+    const d=document.createElement("div");
+    d.className="slide"+(i===0?" active":"");
+    d.innerHTML="<h2>"+s.title+"</h2><p>"+(s.content||"")+"</p>";
+    stage.appendChild(d);
+  });
+  update();
+}
+
+function update(){
+  document.querySelectorAll(".slide").forEach((s,i)=>s.classList.toggle("active",i===idx));
+  document.getElementById("counter").textContent=(idx+1)+" / "+slides.length;
+}
+
+function next(){ if(idx<slides.length-1){idx++;update();}}
+function prev(){ if(idx>0){idx--;update();}}
+</script>
+</body>
+</html>
+"""
+
+# ========== RUN ==========
+app.run(host="0.0.0.0", port=3000)
