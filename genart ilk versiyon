@@ -1,0 +1,71 @@
+/**
+ * GENERATIVE AI ART APP - CONSOLIDATED BACKEND CODE
+ * Bu dosya Şema, Depolama ve API rotalarını tek bir mantıksal akışta birleştirir.
+ */
+
+import { pgTable, text, serial, timestamp } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import OpenAI from "openai";
+import express from "express";
+
+// 1. VERİ ŞEMASI (Database Schema)
+export const images = pgTable("images", {
+  id: serial("id").primaryKey(),
+  prompt: text("prompt").notNull(),
+  imageUrl: text("image_url").notNull(), // Base64 PNG verisi
+  style: text("style").notNull(),
+  aiInterpretation: text("ai_interpretation"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// 2. GÖRSEL ÜRETİM MANTIĞI (OpenAI Integration)
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+// 3. API ROTALARI (Express Routes)
+export async function registerRoutes(app: express.Express) {
+  
+  // Resim Oluşturma Endpoint'i
+  app.post("/api/images", async (req, res) => {
+    try {
+      const { prompt, style } = req.body;
+
+      // OpenAI DALL-E (gpt-image-1) ile resim üretimi
+      const response = await openai.images.generate({
+        model: "gpt-image-1",
+        prompt: prompt,
+        size: "1024x1024",
+      });
+
+      const b64Image = response.data[0].b64_json;
+      const imageUrl = `data:image/png;base64,${b64Image}`;
+
+      // Veritabanına Kaydet
+      const [newImage] = await db.insert(images).values({
+        prompt,
+        style,
+        imageUrl,
+        aiInterpretation: "AI tarafından üretilen gerçekçi görsel."
+      }).returning();
+
+      res.status(201).json(newImage);
+    } catch (error) {
+      res.status(500).json({ error: "Resim üretilemedi." });
+    }
+  });
+
+  // Resimleri Listeleme
+  app.get("/api/images", async (req, res) => {
+    const allImages = await db.select().from(images).orderBy(desc(images.createdAt));
+    res.json(allImages);
+  });
+}
+
+/**
+ * FRONTEND NOTU: 
+ * Frontend tarafında ise 'file-saver' kütüphanesi ile 
+ * saveAs(image.imageUrl, 'resim.png') 
+ * komutu kullanılarak indirme işlemi tek satırda yapılır.
+ */
