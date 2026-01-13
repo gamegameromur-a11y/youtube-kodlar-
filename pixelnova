@@ -1,0 +1,60 @@
+1. Ana Sayfa ve Üretim Merkezi (Home.tsx)
+Bu kod, Pikzels tarzı arayüzü, sekme geçişlerini ve AI üretim tetikleyicilerini içerir:
+
+// client/src/pages/Home.tsx
+export default function Home() {
+  const [prompt, setPrompt] = useState("");
+  const [activeTab, setActiveTab] = useState("prompt"); // prompt, recreate, edit, video, title, analyze
+  const generateMutation = useGenerateImage();
+  const generateVideoMutation = useGenerateVideo();
+  const handleGenerate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (activeTab === 'video') {
+        await generateVideoMutation.mutateAsync({ prompt });
+      } else {
+        await generateMutation.mutateAsync({
+          prompt,
+          type: activeTab === 'edit' ? 'edit' : 'thumbnail'
+        });
+      }
+      setPrompt("");
+    } catch (error) { /* Hata yönetimi */ }
+  };
+  return (
+    // Pikzels tarzı koyu tema ve merkezi üretim kartı tasarımı...
+  );
+}
+2. Akıllı Prompt ve AI Mantığı (server/routes.ts)
+Yapay zekanın kullanıcı komutlarını anlamasını sağlayan arka plan mantığı:
+
+// server/routes.ts
+app.post("/api/images", async (req, res) => {
+  const { prompt, type } = req.body;
+  
+  // AI Research & Enhancement (GPT-5)
+  const systemPrompt = type === "edit"
+    ? "AI düzenleme modeli için detaylı inpainting promptu oluştur. Örn: 'yanıma Elon Musk getir' -> 'Realistic photo of Elon Musk standing next to the person...'"
+    : "Gerçekçi YouTube kapak tasarımı promptu oluştur...";
+  const research = await gpt5.chat.completions.create({
+    messages: [{ role: "system", content: systemPrompt }, { role: "user", content: prompt }]
+  });
+  // Görsel Üretimi (OpenAI)
+  const image = await openai.images.generate({
+    model: "gpt-image-1",
+    prompt: research.choices[0].message.content,
+  });
+  
+  // Veritabanına kaydet ve yanıt dön...
+});
+3. Tüm Sayfaların Yönlendirmesi (App.tsx)
+Footer'daki linklerin (Hakkımızda, API, Fiyatlandırma vb.) çalışmasını sağlayan yönlendirme yapısı:
+
+// client/src/App.tsx
+<Switch>
+  <Route path="/" component={Home} />
+  <Route path="/features"><GenericPage title="Özellikler" ... /></Route>
+  <Route path="/pricing"><GenericPage title="Fiyatlandırma" ... /></Route>
+  <Route path="/api-docs"><GenericPage title="API" ... /></Route>
+  {/* Diğer tüm legal ve şirket sayfaları... */}
+</Switch>
